@@ -2,10 +2,36 @@ cmake_minimum_required(VERSION 3.1)
 project(mixed)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
 
+## Generate git header
+find_program(GIT_SCM git DOC "Git version control")
+mark_as_advanced(GIT_SCM)
+find_file(GITDIR NAMES .git PATHS ${CMAKE_CURRENT_SOURCE_DIR} NO_DEFAULT_PATH)
+if (GIT_SCM AND GITDIR)
+  exec_program(
+    "git" ${CMAKE_CURRENT_SOURCE_DIR} ARGS "describe" "--tags" "--long"
+    OUTPUT_VARIABLE VERSION )
+  file(WRITE "VERSION" ${VERSION})
+  message(STATUS "Rebuilt VERSION")
+else()
+  file(READ "VERSION" VERSION)
+endif()
+add_definitions( -DVERSION="${VERSION}" )
+
+## Libsamplerate
+file(GLOB samplerate_src "libsamplerate/*.c")
+add_library(samplerate OBJECT ${samplerate_src})
+
 ## Main Library
 include_directories("src/")
-file(GLOB lib_src "src/*.c" "src/segments/*.c")
-add_library(mixed SHARED ${lib_src})
+file(GLOB mixed_src "src/*.c" "src/segments/*.c")
+add_library(mixed SHARED ${mixed_src} $<TARGET_OBJECTS:samplerate>)
+string(REGEX MATCH "([0-9]+)\\.([0-9]+)-[0-9]+-(.+)" TMP ${VERSION})
+set(MIXED_VERSION_MAJOR ${CMAKE_MATCH_1})
+set(MIXED_VERSION_MINOR ${CMAKE_MATCH_2})
+set(MIXED_VERSION_PATCH ${CMAKE_MATCH_3})
+set(MIXED_VERSION_STRING ${MIXED_VERSION_MAJOR}.${MIXED_VERSION_MINOR}-${MIXED_VERSION_PATCH})
+set_property(TARGET mixed PROPERTY VERSION ${MIXED_VERSION_STRING})
+set_property(TARGET mixed PROPERTY SOVERSION ${MIXED_VERSION_MAJOR})
 set_property(TARGET mixed PROPERTY C_STANDARD 99)
 set_property(TARGET mixed PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_compile_definitions(mixed PRIVATE MIXED_BUILD=1)

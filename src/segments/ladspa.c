@@ -81,9 +81,10 @@ int ladspa_segment_set_out(size_t field, size_t location, void *buffer, struct m
   }
 }
 
-void ladspa_segment_mix(size_t samples, struct mixed_segment *segment){
+int ladspa_segment_mix(size_t samples, struct mixed_segment *segment){
   struct ladspa_segment_data *data = (struct ladspa_segment_data *)segment->data;
   data->descriptor->run(data->handle, samples);
+  return 1;
 }
 
 int ladspa_segment_start(struct mixed_segment *segment){
@@ -116,36 +117,35 @@ int ladspa_segment_end(struct mixed_segment *segment){
   return 1;
 }
 
-struct mixed_segment_info *ladspa_segment_info(struct mixed_segment *segment){
+int ladspa_segment_info(struct mixed_segment_info *info, struct mixed_segment *segment){
   struct ladspa_segment_data *data = (struct ladspa_segment_data *)segment->data;
-  struct mixed_segment_info *info = calloc(1, sizeof(struct mixed_segment_info));
-
-  if(info){
-    info->name = "ladspa";
-    info->description = data->descriptor->Name;
-    info->min_inputs = 0;
-    info->max_inputs = 0;
-    info->outputs = 0;
-
-    if(!LADSPA_IS_INPLACE_BROKEN(data->descriptor->Properties)){
-      info->flags = MIXED_INPLACE;
-    }
   
-    for(size_t i=0; i<data->descriptor->PortCount; ++i){
-      const LADSPA_PortDescriptor port = data->descriptor->PortDescriptors[i];
-      if(LADSPA_IS_PORT_AUDIO(port)){
-        if(LADSPA_IS_PORT_INPUT(port)){
-          ++info->max_inputs;
-          ++info->min_inputs;
-        }else{
-          ++info->outputs;
-        }
-      }
+  info->name = "ladspa";
+  info->description = data->descriptor->Name;
+  info->min_inputs = 0;
+  info->max_inputs = 0;
+  info->outputs = 0;
 
-      // FIXME: Fill fields
-    }
+  if(!LADSPA_IS_INPLACE_BROKEN(data->descriptor->Properties)){
+    info->flags = MIXED_INPLACE;
   }
-  return info;
+  
+  for(size_t i=0; i<data->descriptor->PortCount; ++i){
+    const LADSPA_PortDescriptor port = data->descriptor->PortDescriptors[i];
+    if(LADSPA_IS_PORT_AUDIO(port)){
+      if(LADSPA_IS_PORT_INPUT(port)){
+        ++info->max_inputs;
+        ++info->min_inputs;
+      }else{
+        ++info->outputs;
+      }
+    }
+
+    // FIXME: Fill fields
+    struct mixed_segment_field_info *field = info->fields;
+    clear_info_field(field++);
+  }
+  return 1;
 }
 
 int ladspa_segment_get(size_t field, void *value, struct mixed_segment *segment){

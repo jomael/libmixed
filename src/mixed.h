@@ -72,7 +72,9 @@ extern "C" {
     MIXED_LADSPA_NO_PLUGIN_AT_INDEX,
     // The instantiation of the LADSPA plugin handle failed
     // for some reason.
-    MIXED_LADSPA_INSTANTIATION_FAILED
+    MIXED_LADSPA_INSTANTIATION_FAILED,
+    // A libsamplerate operation failed.
+    MIXED_RESAMPLE_FAILED
   };
 
   // This enum describes the possible sample encodings.
@@ -125,10 +127,10 @@ extern "C" {
     // to values higher than one will result in distortion.
     // The type of this field should be a float.
     MIXED_VOLUME,
-    // Access to the resampling function of the channel.
-    // The resampling function must have the same signature
-    // as mixed_resample_linear below.
-    MIXED_PACKED_AUDIO_RESAMPLER,
+    // Access to the resampling quality of the audio pack.
+    // The value must be from the mixed_resample_type enum.
+    // The default is MIXED_SINC_FASTEST
+    MIXED_PACKED_AUDIO_RESAMPLE_TYPE,
     // Access the panning of the general segment as a float.
     // The pan should be in the range of [-1.0, +1.0] where
     // -1 is all the way on the left and +1 is on the right.
@@ -248,7 +250,46 @@ extern "C" {
     MIXED_FREQUENCY_CUTOFF,
     // Access whether to pass frequencies above or below the cutoff.
     // This value is an enum mixed_frequency_pass.
-    MIXED_FREQUENCY_PASS
+    MIXED_FREQUENCY_PASS,
+    // Access the number of input buffers the segment can hold.
+    // The value is a size_t.
+    // The default is 2.
+    MIXED_IN_COUNT,
+    // Access the number of output buffers the segment can hold.
+    // The value is a size_t.
+    // The default is 2.
+    MIXED_OUT_COUNT,
+    // Returns the current segment in the queue.
+    // The value is a pointer to a struct mixed_segment.
+    MIXED_CURRENT_SEGMENT,
+  };
+
+  // This enum descripbes the possible resampling quality options.
+  // 
+  // The options are the same as in SRC/libsamplerate and the
+  // descriptions are copied from its documentation.
+  MIXED_EXPORT enum mixed_resample_type{
+    // This is a bandlimited interpolator derived from the
+    // mathematical sinc function and this is the highest
+    // quality sinc based converter, providing a worst case
+    // Signal-to-Noise Ratio (SNR) of 97 decibels (dB) at a
+    // bandwidth of 97%.
+    MIXED_SINC_BEST_QUALITY = 0,
+    // This is another bandlimited interpolator much like
+    // the previous one. It has an SNR of 97dB and a
+    // bandwidth of 90%. The speed of the conversion is
+    // much faster than the previous one.
+    MIXED_SINC_MEDIUM_QUALITY,
+    // This is the fastest bandlimited interpolator and has
+    // an SNR of 97dB and a bandwidth of 80%.
+    MIXED_SINC_FASTEST,
+    // A Zero Order Hold converter (interpolated value is
+    // equal to the last value). The quality is poor but the
+    // conversion speed is blindlingly fast.
+    MIXED_ZERO_ORDER_HOLD,
+    // A linear converter. Again the quality is poor, but
+    // the conversion speed is blindingly fast.
+    MIXED_LINEAR_INTERPOLATION
   };
 
   // This enum describes the possible preset attenuation functions.
@@ -363,7 +404,8 @@ extern "C" {
     MIXED_ATTENUATION_ENUM,
     MIXED_LAYOUT_ENUM,
     MIXED_ENCODING_ENUM,
-    MIXED_ERROR_ENUM
+    MIXED_ERROR_ENUM,
+    MIXED_RESAMPLE_TYPE_ENUM,
   };
 
   // An internal audio data buffer.
@@ -472,9 +514,9 @@ extern "C" {
   // function below.
   MIXED_EXPORT struct mixed_segment{
     int (*free)(struct mixed_segment *segment);
-    struct mixed_segment_info *(*info)(struct mixed_segment *segment);
+    int (*info)(struct mixed_segment_info *info, struct mixed_segment *segment);
     int (*start)(struct mixed_segment *segment);
-    void (*mix)(size_t samples, struct mixed_segment *segment);
+    int (*mix)(size_t samples, struct mixed_segment *segment);
     int (*end)(struct mixed_segment *segment);
     int (*set_in)(size_t field, size_t location, void *value, struct mixed_segment *segment);
     int (*set_out)(size_t field, size_t location, void *value, struct mixed_segment *segment);
@@ -564,28 +606,6 @@ extern "C" {
   // If the resizing operation fails due to a lack of memory, the
   // old data is preserved and the buffer is not changed.
   MIXED_EXPORT int mixed_buffer_resize(size_t size, struct mixed_buffer *buffer);
-  
-  // Resample the buffer using nearest-neighbor.
-  //
-  // This is the fastest and most primitive resampling you could
-  // possibly do. It will most likely sound pretty horrid if you
-  // have to upsample. Downsampling might be alright.
-  MIXED_EXPORT int mixed_resample_nearest(struct mixed_buffer *in, size_t in_samplerate, struct mixed_buffer *out, size_t out_samplerate, size_t out_samples);
-
-  // Resample the buffer using linear interpolation.
-  //
-  // Linear interpolation should give "ok" results as long as the
-  // resampling factor is not too big.
-  MIXED_EXPORT int mixed_resample_linear(struct mixed_buffer *in, size_t in_samplerate, struct mixed_buffer *out, size_t out_samplerate, size_t out_samples);
-
-  // Resample the buffer using a cubic hermite spline.
-  //
-  // Cubic hermite spline should give fairly good interpolation
-  // results. Naturally you can't expect magic either, as the
-  // interpolation will always remain an interpolation and not a
-  // CSI enhance. This resampling will become costly at large
-  // buffer sizes and might not be suitable for real-time systems.
-  MIXED_EXPORT int mixed_resample_cubic(struct mixed_buffer *in, size_t in_samplerate, struct mixed_buffer *out, size_t out_samplerate, size_t out_samples);
 
   // Free the segment's internal data.
   //
@@ -608,8 +628,14 @@ extern "C" {
 
   // Run the segment for the given number of samples.
   //
+  // If this returns zero, then the segment did not produce any
+  // output and can't be expected to produce any until it is
+  // restarted. This happens if the segment is some kind of
+  // finite source and has ended, or if an internal error
+  // occurred that prevents the segment from operating.
+  //
   // See mixed_segment_sequence_mix
-  MIXED_EXPORT void mixed_segment_mix(size_t samples, struct mixed_segment *segment);
+  MIXED_EXPORT int mixed_segment_mix(size_t samples, struct mixed_segment *segment);
 
   // End the segment's mixing process.
   //
@@ -670,7 +696,7 @@ extern "C" {
   //
   // If the method is not implemented, the error is set to
   // MIXED_NOT_IMPLEMENTED and a null pointer is returned.
-  MIXED_EXPORT struct mixed_segment_info *mixed_segment_info(struct mixed_segment *segment);
+  MIXED_EXPORT int mixed_segment_info(struct mixed_segment_info *info, struct mixed_segment *segment);
 
   // Set the value of a field in the segment.
   //
@@ -907,6 +933,29 @@ extern "C" {
   // occur, so tread carefully.
   MIXED_EXPORT int mixed_make_segment_frequency_pass(enum mixed_frequency_pass pass, size_t cutoff, size_t samplerate, struct mixed_segment *segment);
 
+  // A queue segment for inner segments.
+  //
+  // The queue will delegate mixing to the first segment in its list until that
+  // segment is explicitly removed, or returns zero from its mix function.
+  // When a new segment is added to the queue, the queue will connect as many
+  // of its buffers as appropriate. When the segment is removed, the buffers
+  // are also unset.
+  //
+  // If the queue is empty or is being bypassed, it will simply copy the
+  // contents of the input buffers to corresponding output buffers. If there are
+  // more output buffers than input buffers, the remaining are cleared to zero.
+  //
+  // The number of bufers that can be connected to the queue is controlled by
+  // the MIXED_IN_COUNT and MIXED_OUT_COUNT fields.
+  //
+  // The queue's info will reflect the capabilities of the first segment, if any,
+  // and the queue's maximal capabilities otherwise.
+  MIXED_EXPORT int mixed_make_segment_queue(struct mixed_segment *segment);
+  MIXED_EXPORT int mixed_queue_add(struct mixed_segment *new, struct mixed_segment *queue);
+  MIXED_EXPORT int mixed_queue_remove(struct mixed_segment *old, struct mixed_segment *queue);
+  MIXED_EXPORT int mixed_queue_remove_at(size_t pos, struct mixed_segment *queue);
+  MIXED_EXPORT int mixed_queue_clear(struct mixed_segment *queue);
+
   // Free the associated sequence data.
   MIXED_EXPORT void mixed_free_segment_sequence(struct mixed_segment_sequence *mixer);
 
@@ -952,6 +1001,9 @@ extern "C" {
   MIXED_EXPORT uint8_t mixed_samplesize(enum mixed_encoding encoding);
 
   // Return the current error code.
+  //
+  // The error code is thread-local in order to allow multiple operations
+  // at the same time.
   MIXED_EXPORT int mixed_error();
 
   // Return the error string for the given error code.
@@ -959,6 +1011,9 @@ extern "C" {
   // If the error code is less than zero, the error string for the
   // error code returned by mixed_error(); is returned instead.
   MIXED_EXPORT char *mixed_error_string(int error_code);
+
+  // Returns the version string of the library.
+  MIXED_EXPORT char *mixed_version();
 
 #ifdef __cplusplus
 }

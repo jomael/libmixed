@@ -16,10 +16,11 @@ MIXED_EXPORT uint8_t mixed_samplesize(enum mixed_encoding encoding){
   }
 }
 
-void mix_noop(size_t samples, struct mixed_segment *segment){
+int mix_noop(size_t samples, struct mixed_segment *segment){
+  return 1;
 }
 
-int errorcode = 0;
+thread_local int errorcode = 0;
 
 void mixed_err(int code){
   errorcode = code;
@@ -64,9 +65,15 @@ MIXED_EXPORT char *mixed_error_string(int code){
     return "The LADSPA plugin library does not have a plugin at the requested index.";
   case MIXED_LADSPA_INSTANTIATION_FAILED:
     return "Instantiation of the LADSPA plugin has failed.";
+  case MIXED_RESAMPLE_FAILED:
+    return "An error happened in the libsamplerate library.";
   default:
     return "Unknown error code.";
   }
+}
+
+MIXED_EXPORT char *mixed_version(){
+  return VERSION;
 }
 
 void *crealloc(void *ptr, size_t oldcount, size_t newcount, size_t size){
@@ -85,6 +92,18 @@ void set_info_field(struct mixed_segment_field_info *info, size_t field, enum mi
   info->flags = flags;
   info->type = type;
   info->type_count = count;
+}
+
+void clear_info_field(struct mixed_segment_field_info *info){
+  info->field = 0;
+  info->description = 0;
+  info->flags = 0;
+  info->type = 0;
+  info->type_count = 0;
+}
+
+size_t smin(size_t a, size_t b){
+  return (a<b)?a:b;
 }
 
 float mixed_random_m(){

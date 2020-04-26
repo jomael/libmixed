@@ -74,7 +74,7 @@ int basic_mixer_set_in(size_t field, size_t location, void *buffer, struct mixed
   }
 }
 
-void basic_mixer_mix(size_t samples, struct mixed_segment *segment){
+int basic_mixer_mix(size_t samples, struct mixed_segment *segment){
   struct basic_mixer_data *data = (struct basic_mixer_data *)segment->data;
   size_t buffers = data->count / data->channels;
   if(0 < buffers){
@@ -88,9 +88,13 @@ void basic_mixer_mix(size_t samples, struct mixed_segment *segment){
       // Mix first buffer directly.
       struct mixer_source *source = data->sources[c];
       struct mixed_segment *segment = source->segment;
-      if(segment) segment->mix(samples, segment);
-      
       float *in = source->buffer->data;
+      if(segment){
+        // FIXME: This is not optimal. Ideally we'd avoid mixing entirely.
+        if(!segment->mix(samples, segment))
+          memset(in, 0, samples*sizeof(float));
+      }
+      
       for(size_t i=0; i<samples; ++i){
         out[i] = in[i]*div;
       }
@@ -98,9 +102,13 @@ void basic_mixer_mix(size_t samples, struct mixed_segment *segment){
       for(size_t b=1; b<buffers; ++b){
         source = data->sources[b*channels+c];
         segment = source->segment;
-        if(segment) segment->mix(samples, segment);
-        
         in = source->buffer->data;
+        
+        if(segment){
+          if(!segment->mix(samples, segment))
+            memset(in, 0, samples*sizeof(float));
+        }
+        
         for(size_t i=0; i<samples; ++i){
           out[i] += in[i]*div;
         }
@@ -111,6 +119,7 @@ void basic_mixer_mix(size_t samples, struct mixed_segment *segment){
       memset(data->out[c]->data, 0, samples*sizeof(float));
     }
   }
+  return 1;
 }
 
 // FIXME: add start method that checks for buffer completeness.
@@ -163,32 +172,29 @@ int basic_mixer_get(size_t field, void *value, struct mixed_segment *segment){
   }
 }
 
-struct mixed_segment_info *basic_mixer_info(struct mixed_segment *segment){
+int basic_mixer_info(struct mixed_segment_info *info, struct mixed_segment *segment){
   struct basic_mixer_data *data = (struct basic_mixer_data *)segment->data;
-  struct mixed_segment_info *info = calloc(1, sizeof(struct mixed_segment_info));
-
-  if(info){
-    info->name = "basic_mixer";
-    info->description = "Mixes multiple buffers together";
-    info->min_inputs = 0;
-    info->max_inputs = -1;
-    info->outputs = data->channels;
+  info->name = "basic_mixer";
+  info->description = "Mixes multiple buffers together";
+  info->min_inputs = 0;
+  info->max_inputs = -1;
+  info->outputs = data->channels;
   
-    struct mixed_segment_field_info *field = info->fields;
-    set_info_field(field++, MIXED_BUFFER,
-                   MIXED_BUFFER_POINTER, 1, MIXED_IN | MIXED_OUT | MIXED_SET,
-                   "The buffer for audio data attached to the location.");
+  struct mixed_segment_field_info *field = info->fields;
+  set_info_field(field++, MIXED_BUFFER,
+                 MIXED_BUFFER_POINTER, 1, MIXED_IN | MIXED_OUT | MIXED_SET,
+                 "The buffer for audio data attached to the location.");
 
-    set_info_field(field++, MIXED_VOLUME,
-                   MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The volume scaling factor for the output.");
+  set_info_field(field++, MIXED_VOLUME,
+                 MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The volume scaling factor for the output.");
 
-    set_info_field(field++, MIXED_SOURCE,
-                   MIXED_SEGMENT_POINTER, 1, MIXED_IN | MIXED_SET,
-                   "The segment that needs to be mixed before its buffer has any useful data.");
-  }
-
-  return info;
+  set_info_field(field++, MIXED_SOURCE,
+                 MIXED_SEGMENT_POINTER, 1, MIXED_IN | MIXED_SET,
+                 "The segment that needs to be mixed before its buffer has any useful data.");
+  
+  clear_info_field(field++);
+  return 1;
 }
 
 MIXED_EXPORT int mixed_make_segment_basic_mixer(size_t channels, struct mixed_segment *segment){

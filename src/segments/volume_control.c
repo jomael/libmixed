@@ -1,5 +1,6 @@
 #include "internal.h"
 
+//FIXME: allow arbitrary buffers
 struct volume_control_segment_data{
   struct mixed_buffer *in[2];
   struct mixed_buffer *out[2];
@@ -48,7 +49,7 @@ int volume_control_segment_set_out(size_t field, size_t location, void *buffer, 
   }
 }
 
-void volume_control_segment_mix(size_t samples, struct mixed_segment *segment){
+int volume_control_segment_mix(size_t samples, struct mixed_segment *segment){
   struct volume_control_segment_data *data = (struct volume_control_segment_data *)segment->data;
   float lvolume = data->volume * ((0.0<data->pan)?(1.0f-data->pan):1.0f);
   float rvolume = data->volume * ((data->pan<0.0)?(1.0f+data->pan):1.0f);
@@ -57,45 +58,44 @@ void volume_control_segment_mix(size_t samples, struct mixed_segment *segment){
     data->out[MIXED_LEFT]->data[i] = data->in[MIXED_LEFT]->data[i]*lvolume;
     data->out[MIXED_RIGHT]->data[i] = data->in[MIXED_RIGHT]->data[i]*rvolume;
   }
+  return 1;
 }
 
-void volume_control_segment_mix_bypass(size_t samples, struct mixed_segment *segment){
+int volume_control_segment_mix_bypass(size_t samples, struct mixed_segment *segment){
   struct volume_control_segment_data *data = (struct volume_control_segment_data *)segment->data;
 
   mixed_buffer_copy(data->in[MIXED_LEFT], data->out[MIXED_LEFT]);
   mixed_buffer_copy(data->in[MIXED_RIGHT], data->out[MIXED_RIGHT]);
+  return 1;
 }
 
-struct mixed_segment_info *volume_control_segment_info(struct mixed_segment *segment){
-  struct mixed_segment_info *info = calloc(1, sizeof(struct mixed_segment_info));
-
-  if(info){
-    info->name = "volume_control";
-    info->description = "General segment for volume adjustment and panning.";
-    info->flags = MIXED_INPLACE;
-    info->min_inputs = 2;
-    info->max_inputs = 2;
-    info->outputs = 2;
+int volume_control_segment_info(struct mixed_segment_info *info, struct mixed_segment *segment){
+  info->name = "volume_control";
+  info->description = "General segment for volume adjustment and panning.";
+  info->flags = MIXED_INPLACE;
+  info->min_inputs = 2;
+  info->max_inputs = 2;
+  info->outputs = 2;
   
-    struct mixed_segment_field_info *field = info->fields;
-    set_info_field(field++, MIXED_BUFFER,
-                   MIXED_BUFFER_POINTER, 1, MIXED_IN | MIXED_OUT | MIXED_SET,
-                   "The buffer for audio data attached to the location.");
+  struct mixed_segment_field_info *field = info->fields;
+  set_info_field(field++, MIXED_BUFFER,
+                 MIXED_BUFFER_POINTER, 1, MIXED_IN | MIXED_OUT | MIXED_SET,
+                 "The buffer for audio data attached to the location.");
 
-    set_info_field(field++, MIXED_VOLUME,
-                   MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The volume scaling factor for the input.");
+  set_info_field(field++, MIXED_VOLUME,
+                 MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The volume scaling factor for the input.");
 
-    set_info_field(field++, MIXED_VOLUME_CONTROL_PAN,
-                   MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The left/right stereo panning.");
+  set_info_field(field++, MIXED_VOLUME_CONTROL_PAN,
+                 MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The left/right stereo panning.");
 
-    set_info_field(field++, MIXED_BYPASS,
-                   MIXED_BOOL, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "Bypass the segment's processing.");
-  }
+  set_info_field(field++, MIXED_BYPASS,
+                 MIXED_BOOL, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "Bypass the segment's processing.");
   
-  return info;
+  clear_info_field(field++);
+  return 1;
 }
 
 int volume_control_segment_get(size_t field, void *value, struct mixed_segment *segment){

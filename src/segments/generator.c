@@ -53,7 +53,7 @@ float sawtooth_wave(float frequency, float phase, float samplerate){
   return fmod(phase, length) / length * 2.0 - 1.0;
 }
 
-void generator_segment_mix(size_t samples, struct mixed_segment *segment){
+int generator_segment_mix(size_t samples, struct mixed_segment *segment){
   struct generator_segment_data *data = (struct generator_segment_data *)segment->data;
   size_t phase = data->phase;
   float (*generator)(float frequency, float phase, float samplerate) = 0;
@@ -73,37 +73,35 @@ void generator_segment_mix(size_t samples, struct mixed_segment *segment){
   }
 
   data->phase = phase;
+  return 1;
 }
 
-struct mixed_segment_info *generator_segment_info(struct mixed_segment *segment){
-  struct mixed_segment_info *info = calloc(1, sizeof(struct mixed_segment_info));
+int generator_segment_info(struct mixed_segment_info *info, struct mixed_segment *segment){
+  info->name = "generator";
+  info->description = "Wave generator source segment";
+  info->min_inputs = 0;
+  info->max_inputs = 0;
+  info->outputs = 1;
+  
+  struct mixed_segment_field_info *field = info->fields;
+  set_info_field(field++, MIXED_BUFFER,
+                 MIXED_BUFFER_POINTER, 1, MIXED_OUT | MIXED_SET,
+                 "The buffer for audio data attached to the location.");
 
-  if(info){
-    info->name = "generator";
-    info->description = "Wave generator source segment";
-    info->min_inputs = 0;
-    info->max_inputs = 0;
-    info->outputs = 1;
+  set_info_field(field++, MIXED_VOLUME,
+                 MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The volume scaling factor.");
   
-    struct mixed_segment_field_info *field = info->fields;
-    set_info_field(field++, MIXED_BUFFER,
-                   MIXED_BUFFER_POINTER, 1, MIXED_OUT | MIXED_SET,
-                   "The buffer for audio data attached to the location.");
-
-    set_info_field(field++, MIXED_VOLUME,
-                   MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The volume scaling factor.");
+  set_info_field(field++, MIXED_GENERATOR_FREQUENCY,
+                 MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The frequency in Hz of the generated tone.");
   
-    set_info_field(field++, MIXED_GENERATOR_FREQUENCY,
-                   MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The frequency in Hz of the generated tone.");
+  set_info_field(field++, MIXED_GENERATOR_TYPE,
+                 MIXED_GENERATOR_TYPE_ENUM, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The type of wave form that is produced.");
   
-    set_info_field(field++, MIXED_GENERATOR_TYPE,
-                   MIXED_GENERATOR_TYPE_ENUM, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The type of wave form that is produced.");
-  }
-  
-  return info;
+  clear_info_field(field++);
+  return 1;
 }
 
 int generator_segment_get(size_t field, void *value, struct mixed_segment *segment){

@@ -160,7 +160,7 @@ float calculate_pitch_shift(struct space_mixer_data *listener, struct space_sour
   return (SS - DF*vls) / (SS - DF*vss);
 }
 
-void space_mixer_mix(size_t samples, struct mixed_segment *segment){
+int space_mixer_mix(size_t samples, struct mixed_segment *segment){
   struct space_mixer_data *data = (struct space_mixer_data *)segment->data;
 
   // Shift frequencies
@@ -185,9 +185,15 @@ void space_mixer_mix(size_t samples, struct mixed_segment *segment){
     struct space_source *source = data->sources[0];
     // Invoke segment's mixing function if necessary.
     struct mixed_segment *segment = source->segment;
-    if(segment) segment->mix(samples, segment);
-    // Perform mix.
     float *in = source->buffer->data;
+
+    if(segment){
+      // FIXME: This is not optimal. Ideally we'd avoid mixing entirely.
+      if(!segment->mix(samples, segment))
+        memset(in, 0, samples*sizeof(float));
+    }
+    
+    // Perform mix.
     calculate_volumes(&lvolume, &rvolume, source, data);
     for(size_t i=0; i<samples; ++i){
       left[i] = in[i] * lvolume;
@@ -198,9 +204,14 @@ void space_mixer_mix(size_t samples, struct mixed_segment *segment){
       source = data->sources[s];
       // Invoke segment's mixing function if necessary.
       segment = source->segment;
-      if(segment) segment->mix(samples, segment);
-      // Perform mix.
       in = source->buffer->data;
+
+      if(segment){
+        if(!segment->mix(samples, segment))
+          memset(in, 0, samples*sizeof(float));
+      }
+
+      // Perform mix.
       calculate_volumes(&lvolume, &rvolume, source, data);
       for(size_t i=0; i<samples; ++i){
         left[i] += in[i] * lvolume;
@@ -208,6 +219,7 @@ void space_mixer_mix(size_t samples, struct mixed_segment *segment){
       }
     }
   }
+  return 1;
 }
 
 int space_mixer_set_out(size_t field, size_t location, void *buffer, struct mixed_segment *segment){
@@ -467,72 +479,69 @@ int space_mixer_set(size_t field, void *value, struct mixed_segment *segment){
   return 1;
 }
 
-struct mixed_segment_info *space_mixer_info(struct mixed_segment *segment){
-  struct mixed_segment_info *info = calloc(1, sizeof(struct mixed_segment_info));
-
-  if(info){
-    info->name = "space_mixer";
-    info->description = "Mixes multiple sources while simulating 3D space.";
-    info->flags = MIXED_MODIFIES_INPUT;
-    info->min_inputs = 0;
-    info->max_inputs = -1;
-    info->outputs = 2;
+int space_mixer_info(struct mixed_segment_info *info, struct mixed_segment *segment){
+  info->name = "space_mixer";
+  info->description = "Mixes multiple sources while simulating 3D space.";
+  info->flags = MIXED_MODIFIES_INPUT;
+  info->min_inputs = 0;
+  info->max_inputs = -1;
+  info->outputs = 2;
     
-    struct mixed_segment_field_info *field = info->fields;
-    set_info_field(field++, MIXED_BUFFER,
-                   MIXED_BUFFER_POINTER, 1, MIXED_IN | MIXED_OUT | MIXED_SET,
-                   "The buffer for audio data attached to the location.");
+  struct mixed_segment_field_info *field = info->fields;
+  set_info_field(field++, MIXED_BUFFER,
+                 MIXED_BUFFER_POINTER, 1, MIXED_IN | MIXED_OUT | MIXED_SET,
+                 "The buffer for audio data attached to the location.");
 
-    set_info_field(field++, MIXED_VOLUME,
-                   MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The volume scaling factor for the output.");
+  set_info_field(field++, MIXED_VOLUME,
+                 MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The volume scaling factor for the output.");
 
-    set_info_field(field++, MIXED_SPACE_LOCATION,
-                   MIXED_FLOAT, 3, MIXED_IN | MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The location of the source or segment (listener) in space.");
+  set_info_field(field++, MIXED_SPACE_LOCATION,
+                 MIXED_FLOAT, 3, MIXED_IN | MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The location of the source or segment (listener) in space.");
 
-    set_info_field(field++, MIXED_SPACE_VELOCITY,
-                   MIXED_FLOAT, 3, MIXED_IN | MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The velocity of the source or segment (listener) in space.");
+  set_info_field(field++, MIXED_SPACE_VELOCITY,
+                 MIXED_FLOAT, 3, MIXED_IN | MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The velocity of the source or segment (listener) in space.");
 
-    set_info_field(field++, MIXED_SPACE_DIRECTION,
-                   MIXED_FLOAT, 3, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The direction the segment is facing in space.");
+  set_info_field(field++, MIXED_SPACE_DIRECTION,
+                 MIXED_FLOAT, 3, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The direction the segment is facing in space.");
 
-    set_info_field(field++, MIXED_SPACE_UP,
-                   MIXED_FLOAT, 3, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The vector designating 'upwards' in space.");
+  set_info_field(field++, MIXED_SPACE_UP,
+                 MIXED_FLOAT, 3, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The vector designating 'upwards' in space.");
 
-    set_info_field(field++, MIXED_SPACE_SOUNDSPEED,
-                   MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The speed of sound. This also implicitly declares the unit size.");
+  set_info_field(field++, MIXED_SPACE_SOUNDSPEED,
+                 MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The speed of sound. This also implicitly declares the unit size.");
 
-    set_info_field(field++, MIXED_SPACE_DOPPLER_FACTOR,
-                   MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The doppler factor. You can use this to exaggerate or dampen the effect.");
+  set_info_field(field++, MIXED_SPACE_DOPPLER_FACTOR,
+                 MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The doppler factor. You can use this to exaggerate or dampen the effect.");
 
-    set_info_field(field++, MIXED_SPACE_MIN_DISTANCE,
-                   MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "Any distance lower than this will make the sound appear at its maximal volume.");
+  set_info_field(field++, MIXED_SPACE_MIN_DISTANCE,
+                 MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "Any distance lower than this will make the sound appear at its maximal volume.");
 
-    set_info_field(field++, MIXED_SPACE_MAX_DISTANCE,
-                   MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "Any distance greater than this will make the sound appear at its minimal volume.");
+  set_info_field(field++, MIXED_SPACE_MAX_DISTANCE,
+                 MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "Any distance greater than this will make the sound appear at its minimal volume.");
 
-    set_info_field(field++, MIXED_SPACE_ROLLOFF,
-                   MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "This factor influences the curve of the attenuation function.");
+  set_info_field(field++, MIXED_SPACE_ROLLOFF,
+                 MIXED_FLOAT, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "This factor influences the curve of the attenuation function.");
 
-    set_info_field(field++, MIXED_SPACE_ATTENUATION,
-                   MIXED_FUNCTION, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
-                   "The function that calculates the attenuation curve that defines the volume of a source by its distance.");
+  set_info_field(field++, MIXED_SPACE_ATTENUATION,
+                 MIXED_FUNCTION, 1, MIXED_SEGMENT | MIXED_SET | MIXED_GET,
+                 "The function that calculates the attenuation curve that defines the volume of a source by its distance.");
 
-    set_info_field(field++, MIXED_SOURCE,
-                   MIXED_SEGMENT_POINTER, 1, MIXED_IN | MIXED_SET | MIXED_GET,
-                   "The segment that needs to be mixed before its buffer has any useful data.");
-  }
+  set_info_field(field++, MIXED_SOURCE,
+                 MIXED_SEGMENT_POINTER, 1, MIXED_IN | MIXED_SET | MIXED_GET,
+                 "The segment that needs to be mixed before its buffer has any useful data.");
 
-  return info;
+  clear_info_field(field++);
+  return 1;
 }
 
 MIXED_EXPORT int mixed_make_segment_space_mixer(size_t samplerate, struct mixed_segment *segment){
